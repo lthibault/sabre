@@ -38,6 +38,27 @@ func TestMapScope_Get(t *testing.T) {
 			want: sabre.Float64(3.1412),
 		},
 		{
+			name:   "NameSpacedBindingsSuccess",
+			symbol: "math/pi",
+			getScope: func() *sabre.MapScope {
+				scope := sabre.NewScope(nil)
+				_ = scope.SwitchNS(sabre.Symbol{Value: "math"})
+				_ = scope.Bind("math/pi", sabre.Float64(3.1412))
+				return scope
+			},
+			want: sabre.Float64(3.1412),
+		},
+		{
+			name:   "NameSpacedBindingsFailure",
+			symbol: "crypto/pi",
+			getScope: func() *sabre.MapScope {
+				parent := sabre.NewScope(nil)
+				_ = parent.Bind("math/pi", sabre.Float64(3.1412))
+				return sabre.NewScope(parent)
+			},
+			wantErr: true,
+		},
+		{
 			name:   "WithNoBinding",
 			symbol: "hello",
 			getScope: func() *sabre.MapScope {

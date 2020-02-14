@@ -2,18 +2,22 @@ package sabre
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
-// NewScope returns an instance of MapScope with no bindings. If includeCore
-// is true, core functions like def, fn, eval etc. will be bound in the new
-// scope.
+const nsSeparator = '/'
+
+// NewScope returns an instance of MapScope with no bindings.
 func NewScope(parent Scope) *MapScope {
 	scope := &MapScope{
 		parent:   parent,
 		mu:       new(sync.RWMutex),
-		bindings: map[string]Value{},
+		bindings: map[nsSymbol]Value{},
 	}
+
+	_ = scope.SwitchNS(Symbol{Value: "user"})
+	_ = scope.BindGo("ns", scope.SwitchNS)
 
 	return scope
 }
@@ -22,7 +26,8 @@ func NewScope(parent Scope) *MapScope {
 type MapScope struct {
 	parent   Scope
 	mu       *sync.RWMutex
-	bindings map[string]Value
+	bindings map[nsSymbol]Value
+	curNS    string
 }
 
 // Parent returns the parent scope of this scope.
@@ -35,7 +40,16 @@ func (scope *MapScope) Bind(symbol string, v Value) error {
 	scope.mu.Lock()
 	defer scope.mu.Unlock()
 
-	scope.bindings[symbol] = v
+	nsSym, err := scope.splitSymbol(symbol)
+	if err != nil {
+		return err
+	}
+
+	if nsSym.NS != scope.CurrentNS() {
+		return fmt.Errorf("cannot to bind outside current namespace")
+	}
+
+	scope.bindings[*nsSym] = v
 	return nil
 }
 
@@ -45,7 +59,16 @@ func (scope *MapScope) Resolve(symbol string) (Value, error) {
 	scope.mu.RLock()
 	defer scope.mu.RUnlock()
 
-	v, found := scope.bindings[symbol]
+	if symbol == "ns" {
+		symbol = "user/ns"
+	}
+
+	nsSym, err := scope.splitSymbol(symbol)
+	if err != nil {
+		return nil, err
+	}
+
+	v, found := scope.bindings[*nsSym]
 	if !found {
 		if scope.parent != nil {
 			return scope.parent.Resolve(symbol)
@@ -57,8 +80,41 @@ func (scope *MapScope) Resolve(symbol string) (Value, error) {
 	return v, nil
 }
 
-// BindGo is similar to Bind but handles covnertion of Go value 'v' to
+// BindGo is similar to Bind but handles convertion of Go value 'v' to
 // sabre Val type.
 func (scope *MapScope) BindGo(symbol string, v interface{}) error {
 	return scope.Bind(symbol, ValueOf(v))
+}
+
+// SwitchNS changes the current namespace to the string value of given symbol.
+func (scope *MapScope) SwitchNS(sym Symbol) error {
+	scope.curNS = sym.String()
+	return scope.Bind("*ns*", sym)
+}
+
+// CurrentNS returns the current active namespace.
+func (scope *MapScope) CurrentNS() string {
+	return scope.curNS
+}
+
+func (scope *MapScope) splitSymbol(symbol string) (*nsSymbol, error) {
+	parts := strings.Split(symbol, string(nsSeparator))
+	if len(parts) < 2 {
+		return &nsSymbol{
+			NS:   scope.curNS,
+			Name: symbol,
+		}, nil
+	} else if len(parts) > 2 {
+		return nil, fmt.Errorf("invalid qualified symbol: '%s'", symbol)
+	}
+
+	return &nsSymbol{
+		NS:   parts[0],
+		Name: parts[1],
+	}, nil
+}
+
+type nsSymbol struct {
+	NS   string
+	Name string
 }

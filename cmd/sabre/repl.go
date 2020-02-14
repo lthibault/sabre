@@ -11,22 +11,35 @@ import (
 	"github.com/spy16/sabre"
 )
 
+const promptPrefix = "=>"
 const help = `Sabre %s [Commit: %s]
 Visit https://github.com/spy16/sabre for more.`
 
-func newREPL(env sabre.Scope) (*REPL, error) {
-	ins, err := readline.New("> ")
+func newREPL(scope sabre.Scope) (*REPL, error) {
+	ins, err := readline.New(getPrompt(scope, promptPrefix))
 	if err != nil {
 		return nil, err
 	}
 	pr := &prompter{ins: ins}
 
 	return &REPL{
-		Env:      env,
+		Env:      scope,
 		ReadIn:   pr.readIn,
 		WriteOut: pr.writeOut,
-		Banner:   fmt.Sprintf(help, version, commit),
+		SetPrompt: func(p string) {
+			ins.SetPrompt(p)
+		},
+		Banner: fmt.Sprintf(help, version, commit),
 	}, nil
+}
+
+func getPrompt(scope sabre.Scope, prompt string) string {
+	curNS := "user"
+	if nsScope, ok := scope.(*sabre.MapScope); ok {
+		curNS = nsScope.CurrentNS()
+	}
+
+	return fmt.Sprintf("%s%s ", curNS, prompt)
 }
 
 // REPL represents a session of read-eval-print-loop.
@@ -34,8 +47,9 @@ type REPL struct {
 	Env    sabre.Scope
 	Banner string
 
-	ReadIn   ReadInFunc
-	WriteOut WriteOutFunc
+	ReadIn    ReadInFunc
+	WriteOut  WriteOutFunc
+	SetPrompt func(p string)
 }
 
 // Start the REPL which reads from in and writes results to out.
@@ -51,6 +65,7 @@ func (repl *REPL) Start(ctx context.Context) error {
 			return nil
 
 		default:
+			repl.SetPrompt(getPrompt(repl.Env, promptPrefix))
 			shouldExit := repl.readAndExecute()
 			if shouldExit {
 				repl.WriteOut("Bye!", nil)
